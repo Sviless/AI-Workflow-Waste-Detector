@@ -1,5 +1,9 @@
 # AI Workflow Waste Detector
 
+[![▶ Live Demo](https://img.shields.io/badge/%E2%96%B6_Live_Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://ai-workflow-waste-detector.streamlit.app/)
+
+**▶️ Try it live:** https://ai-workflow-waste-detector.streamlit.app/
+
 Diagnose workflow waste **before** you automate it.
 
 AI Workflow Waste Detector is a local-first web application that helps teams analyze business, engineering, operational, and knowledge-work workflows to find waste, bottlenecks, unclear ownership, rework loops, duplicated effort, and automation opportunities. It applies Lean, 5S/6S, and operational-excellence thinking to modern digital workflows and then recommends a cleaner future-state design.
