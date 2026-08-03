@@ -1,6 +1,7 @@
 # Secrets — never commit
 .env
 *.env
+.streamlit/secrets.toml
 
 # Local database and generated exports
 data/*.db
