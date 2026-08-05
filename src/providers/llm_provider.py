@@ -1,18 +1,18 @@
-"""LLM Enhanced Mode provider (future-ready).
+"""LLM Enhanced Mode provider (Google Gemini).
 
-This provider is prepared for a future LLM integration but requires **no** API
-key for the app to run. Behavior:
+This provider adds a real LLM integration while keeping the app runnable with
+**no** API key. Behavior:
 
-  * If no ``LLM_API_KEY`` is configured, it transparently falls back to
-    Template Engine Mode and flags that fallback in the analysis metadata.
-  * If a key *is* configured, it builds a strong, provider-neutral prompt and
-    calls :meth:`_call_llm` — the single, clearly marked place where a real
-    API call (OpenAI, Azure OpenAI, Claude, or another vendor) would be added
-    later. Until that call is implemented it returns ``None`` and the provider
-    still falls back to Template Engine Mode so the app always produces output.
+  * If no API key is configured, it transparently falls back to Template Engine
+    Mode and flags that fallback in the analysis metadata.
+  * If a key *is* configured, it builds a strong prompt, calls Google Gemini in
+    :meth:`_call_llm`, and merges the model's structured JSON response onto the
+    reliable Template Engine baseline (so scores and structure are always
+    present, and any Gemini-authored section text overrides the baseline).
 
-No external LLM SDKs are imported here, so there are no extra dependencies and
-no network calls are made.
+The Gemini SDK (``google-genai``) is imported lazily inside the call, so the
+app still works even if the package is not installed — it simply falls back to
+Template Engine Mode. No network call is made unless a key is configured.
 """
 
 from __future__ import annotations
@@ -57,6 +57,28 @@ TARGET_JSON_SCHEMA: dict = {
     "final_summary": "",
 }
 
+# Maps each TARGET_JSON_SCHEMA key to the rendered section title it fills in.
+SCHEMA_TO_SECTION: dict = {
+    "executive_summary": "Executive Summary",
+    "current_state_summary": "Current-State Workflow Summary",
+    "lean_waste_analysis": "Lean Waste Analysis",
+    "six_s_assessment": "5S/6S Workflow Assessment",
+    "bottleneck_analysis": "Bottleneck Analysis",
+    "ownership_handoff_analysis": "Ownership and Handoff Analysis",
+    "rework_duplication_analysis": "Rework and Duplication Analysis",
+    "meeting_reporting_waste": "Meeting and Reporting Waste Analysis",
+    "risk_control_gaps": "Risk and Control Gaps",
+    "automation_readiness_assessment": "Automation Readiness Assessment",
+    "recommended_future_state_workflow": "Recommended Future-State Workflow",
+    "standard_work_checklist": "Standard Work Checklist",
+    "improvement_action_plan": "Improvement Action Plan",
+    "quick_wins": "Quick Wins",
+    "longer_term_improvements": "Longer-Term Improvements",
+    "suggested_metrics": "Suggested Metrics",
+    "before_after_narrative": "Before and After Narrative",
+    "final_summary": "Final Workflow Improvement Summary",
+}
+
 
 class LLMEnhancedProvider(GenerationProvider):
     """Provider that will use an external LLM once one is configured."""
@@ -66,6 +88,8 @@ class LLMEnhancedProvider(GenerationProvider):
     def __init__(self, fallback: GenerationProvider | None = None) -> None:
         # Reuse the local provider for fallback and for guaranteed structure.
         self.fallback = fallback or TemplateEngineProvider()
+        # Populated with the last provider error message (for status display).
+        self._last_error: str = ""
 
     def is_available(self) -> bool:
         """LLM mode is 'available' only when an API key is configured."""
@@ -156,66 +180,131 @@ WORKFLOW INPUT (JSON)
 """
 
     # ------------------------------------------------------------------
-    # Real API call goes here (future work)
+    # Real API call (Google Gemini)
     # ------------------------------------------------------------------
     def _call_llm(self, prompt: str) -> str | None:
-        """Placeholder for a real LLM API call.
+        """Send ``prompt`` to the configured LLM and return the raw response.
 
-        A future integration would send ``prompt`` to the configured provider
-        and return the raw text response. Keep this provider-neutral so it can
-        target OpenAI, Azure OpenAI, Claude, or another vendor.
-
-        Example (pseudocode) for a future implementation:
-
-            api_key = config.get_api_key()          # never logged/printed
-            vendor = config.get_llm_provider_name()  # e.g. "openai"
-            model = config.get_llm_model_name()      # e.g. "gpt-4o-mini"
-            # client = <vendor SDK>(api_key=api_key)
-            # response = client.responses.create(model=model, input=prompt)
-            # return response.output_text
-
-        Until implemented, return None so the app falls back gracefully.
+        Currently targets Google Gemini via the ``google-genai`` SDK. Any
+        failure (missing key, missing SDK, or network/API error) is recorded in
+        ``self._last_error`` and returns ``None`` so the provider falls back to
+        Template Engine Mode instead of crashing the app.
         """
-        # No real call is made yet — no external dependency, no network access.
+        api_key = config.get_api_key()
+        if not api_key:
+            self._last_error = "No API key configured."
+            return None
+
+        provider = config.get_llm_provider_name().lower()
+        if provider in ("gemini", "google", "google-gemini", "generic"):
+            return self._call_gemini(prompt, api_key, config.get_llm_model_name())
+
+        self._last_error = f"Unsupported LLM provider: {provider!r}."
         return None
 
-    def _parse_llm_response(self, raw: str, input_data: dict) -> dict:
-        """Merge a future LLM JSON response onto the local baseline structure.
+    def _call_gemini(self, prompt: str, api_key: str, model: str) -> str | None:
+        """Call the Google Gemini API and return the raw JSON text response."""
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError:
+            self._last_error = (
+                "The 'google-genai' package is not installed. "
+                "Run: pip install google-genai"
+            )
+            return None
 
-        Starting from the local (template) analysis guarantees a complete,
-        renderable structure; any fields the LLM returns override the baseline.
-        This keeps the app robust even if a future response is partial.
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.4,
+                    response_mime_type="application/json",
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - never crash the app on API errors
+            self._last_error = f"Gemini API error: {exc}"
+            return None
 
-        NOTE: The prompt asks the model for :data:`TARGET_JSON_SCHEMA` (the
-        target format for future parsing). This method is not exercised yet
-        because no API call is made — the app still displays text/Markdown from
-        Template Engine Mode. When a real call is wired up, extend the mapping
-        below to translate the TARGET_JSON_SCHEMA keys into the ctx sections.
-        The current key handling is intentionally conservative and backward
-        compatible so nothing breaks before that work is done.
-        """
-        ctx = self.fallback.generate_workflow_analysis(input_data)
+        text = getattr(response, "text", None)
+        if not text:
+            self._last_error = "Gemini returned an empty response."
+            return None
+        return text
+
+    @staticmethod
+    def _extract_json(raw: str) -> dict | None:
+        """Parse a JSON object from ``raw``, tolerating stray text or fences."""
         try:
             data = json.loads(raw)
+            return data if isinstance(data, dict) else None
         except (json.JSONDecodeError, TypeError):
-            return ctx  # Malformed response: keep the reliable baseline.
+            pass
+        if isinstance(raw, str):
+            start, end = raw.find("{"), raw.rfind("}")
+            if start != -1 and end > start:
+                try:
+                    data = json.loads(raw[start : end + 1])
+                    return data if isinstance(data, dict) else None
+                except json.JSONDecodeError:
+                    return None
+        return None
 
-        if isinstance(data.get("sections"), dict):
-            ctx["sections"].update(
-                {k: v for k, v in data["sections"].items() if isinstance(v, str)}
+    @staticmethod
+    def _to_markdown(value: object) -> str:
+        """Render a schema value (string, list, or object) as Markdown."""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            lines: list[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    parts = [
+                        f"**{str(k).replace('_', ' ').title()}:** {v}"
+                        for k, v in item.items()
+                    ]
+                    lines.append("- " + "; ".join(parts))
+                else:
+                    lines.append(f"- {item}")
+            return "\n".join(lines)
+        if isinstance(value, dict):
+            return "\n".join(
+                f"- **{str(k).replace('_', ' ').title()}:** {v}"
+                for k, v in value.items()
             )
-        if isinstance(data.get("waste_findings"), list):
-            ctx["waste_findings"] = data["waste_findings"]
-        if isinstance(data.get("waste_score"), int):
-            ctx["waste"]["score"] = data["waste_score"]
-        if isinstance(data.get("automation_score"), int):
-            ctx["automation"]["score"] = data["automation_score"]
-        if isinstance(data.get("simplify_first"), bool):
-            ctx["simplify_first"] = data["simplify_first"]
+        return str(value)
+
+    def _parse_llm_response(self, raw: str, input_data: dict) -> dict:
+        """Merge the Gemini JSON response onto the local baseline structure.
+
+        Starting from the Template Engine analysis guarantees a complete,
+        renderable structure with locally computed scores. Any section the model
+        returns overrides the corresponding baseline section, so the app stays
+        robust even if the response is partial.
+        """
+        ctx = self.fallback.generate_workflow_analysis(input_data)
+        data = self._extract_json(raw)
+        if not data:
+            ctx["meta"]["requested_mode"] = self.name
+            ctx["meta"]["fell_back"] = True
+            ctx["meta"]["llm_status"] = "parse_error"
+            return ctx
+
+        for key, section in SCHEMA_TO_SECTION.items():
+            value = data.get(key)
+            if value in (None, "", [], {}):
+                continue
+            rendered = self._to_markdown(value)
+            if rendered:
+                ctx["sections"][section] = rendered
 
         ctx["meta"]["mode"] = self.name
         ctx["meta"]["requested_mode"] = self.name
         ctx["meta"]["fell_back"] = False
+        ctx["meta"]["llm_status"] = "ok"
+        ctx["meta"]["llm_model"] = config.get_llm_model_name()
         return ctx
 
     # ------------------------------------------------------------------
@@ -230,18 +319,20 @@ WORKFLOW INPUT (JSON)
             ctx["meta"]["llm_status"] = "no_api_key"
             return ctx
 
-        # 2) Key configured -> build the prompt and attempt the (future) call.
+        # 2) Key configured -> build the prompt and call the LLM.
         prompt = self.build_prompt(input_data)
+        self._last_error = ""
         raw = self._call_llm(prompt)
 
         if raw is None:
-            # Call not implemented yet: fall back but keep the prompt for debugging.
+            # The call failed (missing SDK, API error, etc.): fall back cleanly
+            # to Template Engine Mode and surface why for the status indicator.
             ctx = self.fallback.generate_workflow_analysis(input_data)
             ctx["meta"]["requested_mode"] = self.name
             ctx["meta"]["fell_back"] = True
-            ctx["meta"]["llm_status"] = "not_implemented"
-            ctx["meta"]["llm_prompt_preview"] = prompt[:1200]
+            ctx["meta"]["llm_status"] = "call_failed"
+            ctx["meta"]["llm_error"] = self._last_error
             return ctx
 
-        # 3) Future: a real response was returned -> merge onto the baseline.
+        # 3) A response was returned -> merge it onto the baseline.
         return self._parse_llm_response(raw, input_data)

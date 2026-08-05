@@ -132,26 +132,37 @@ To run in Template Engine Mode (the default):
 streamlit run app.py
 ```
 
-### LLM Enhanced Mode (future-ready)
+### LLM Enhanced Mode (Google Gemini)
 
-- Future-ready architecture behind the same provider interface.
-- Reads an `LLM_API_KEY` environment variable — never hardcoded.
-- Provider-neutral: can later connect to OpenAI, Azure OpenAI, Claude, or another LLM.
-- **Not required** for the app to run. If no key is set, the app automatically
-  falls back to Template Engine Mode and shows:
+- Uses **Google Gemini** to author the analysis, merged onto the reliable
+  Template Engine baseline so scores and structure are always present.
+- Reads the API key from the environment — never hardcoded. Any of
+  `LLM_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY` works.
+- **Not required** for the app to run. If no key is set (or the Gemini call
+  fails), the app automatically falls back to Template Engine Mode and shows:
   *"LLM Enhanced Mode is not configured. The app will use Template Engine Mode instead."*
 
-To prepare for LLM Enhanced Mode, create a `.env` file (or set an environment
-variable):
+To enable it locally, install the optional SDK and set your key:
 
 ```
-LLM_API_KEY=your_key_here
+pip install google-genai
 ```
 
-You can copy `.env.example` to `.env` as a starting point. The actual network
-call lives in a single, clearly marked function (`_call_llm`) in
-[src/providers/llm_provider.py](src/providers/llm_provider.py); until it is
-implemented the app keeps using Template Engine Mode.
+Then create a `.env` file (copy `.env.example` as a starting point):
+
+```
+GEMINI_API_KEY=your_gemini_key_here
+# Optional — defaults to gemini-2.0-flash
+LLM_MODEL=gemini-2.0-flash
+```
+
+Select **LLM Enhanced Mode** in the sidebar, then generate an analysis. The
+network call lives in a single function (`_call_llm`) in
+[src/providers/llm_provider.py](src/providers/llm_provider.py).
+
+**On Streamlit Community Cloud:** open the app → **Manage app → Settings →
+Secrets** and add `GEMINI_API_KEY = "your_gemini_key_here"` (the app mirrors
+that secret into the environment automatically).
 
 > **Important:** Do not include a real key in the repo, and do not commit `.env`
 > files. `.env` is already listed in `.gitignore`.

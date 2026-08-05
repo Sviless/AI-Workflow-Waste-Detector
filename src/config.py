@@ -13,12 +13,18 @@ from __future__ import annotations
 
 import os
 
-# Environment variable name for the (optional) LLM API key.
+# Environment variable names that may hold the LLM API key. The first one that
+# is set wins, so a Gemini user can simply set GEMINI_API_KEY or GOOGLE_API_KEY.
 LLM_API_KEY_ENV = "LLM_API_KEY"
-# Optional: which LLM vendor a future integration should target.
+API_KEY_ENV_NAMES = ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+# Optional: which LLM vendor to target (defaults to Google Gemini).
 LLM_PROVIDER_ENV = "LLM_PROVIDER"
-# Optional: which model a future integration should request.
+# Optional: which model to request.
 LLM_MODEL_ENV = "LLM_MODEL"
+
+# Defaults for the built-in Google Gemini integration.
+DEFAULT_LLM_PROVIDER = "gemini"
+DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 
 # Canonical mode names used across the app.
 MODE_TEMPLATE = "Template Engine Mode"
@@ -59,9 +65,15 @@ _load_dotenv()
 def get_api_key() -> str:
     """Return the LLM API key from the environment, or an empty string.
 
+    Checks each name in :data:`API_KEY_ENV_NAMES` in order so a Gemini user can
+    set any of ``LLM_API_KEY``, ``GEMINI_API_KEY``, or ``GOOGLE_API_KEY``.
     The caller should treat this as a secret and never display it.
     """
-    return os.environ.get(LLM_API_KEY_ENV, "").strip()
+    for name in API_KEY_ENV_NAMES:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def has_api_key() -> bool:
@@ -70,13 +82,13 @@ def has_api_key() -> bool:
 
 
 def get_llm_provider_name() -> str:
-    """Return the configured LLM vendor hint (e.g. 'openai'), or 'generic'."""
-    return os.environ.get(LLM_PROVIDER_ENV, "generic").strip() or "generic"
+    """Return the configured LLM vendor (defaults to Google Gemini)."""
+    return os.environ.get(LLM_PROVIDER_ENV, DEFAULT_LLM_PROVIDER).strip() or DEFAULT_LLM_PROVIDER
 
 
 def get_llm_model_name() -> str:
-    """Return the configured model hint, or a neutral placeholder."""
-    return os.environ.get(LLM_MODEL_ENV, "").strip()
+    """Return the configured model, falling back to the default Gemini model."""
+    return os.environ.get(LLM_MODEL_ENV, "").strip() or DEFAULT_GEMINI_MODEL
 
 
 def resolve_mode(requested_mode: str) -> tuple[str, bool]:

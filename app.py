@@ -9,6 +9,8 @@ package. It runs fully locally using Template Engine Mode (no API key required).
 
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 import streamlit as st
 
@@ -23,6 +25,26 @@ from src.sample_data import (
 from src.template_engine import SECTION_ORDER
 from src.utils import file_timestamp, slugify
 from src.validators import REQUIRED_FIELDS, validate_inputs
+
+
+def _bridge_streamlit_secrets() -> None:
+    """Copy known secrets into the environment for config to read.
+
+    On Streamlit Community Cloud, an API key is provided via the app's Secrets
+    rather than a local .env file. Mirroring those values into os.environ lets
+    the dependency-free config module pick them up without importing Streamlit.
+    """
+    for name in ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                 "LLM_PROVIDER", "LLM_MODEL"):
+        try:
+            if name in st.secrets and name not in os.environ:
+                os.environ[name] = str(st.secrets[name])
+        except Exception:
+            # No secrets configured (e.g. local run) — safe to ignore.
+            pass
+
+
+_bridge_streamlit_secrets()
 
 st.set_page_config(
     page_title="AI Workflow Waste Detector",
@@ -258,7 +280,8 @@ with st.sidebar:
         options=[config.MODE_TEMPLATE, config.MODE_LLM],
         index=0,
         help="Template Engine Mode runs fully locally with no API key. "
-             "LLM Enhanced Mode is future-ready and uses LLM_API_KEY when set.",
+             "LLM Enhanced Mode uses Google Gemini when an API key is set "
+             "(LLM_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY).",
         label_visibility="collapsed",
         key="generation_mode",
     )
@@ -274,7 +297,10 @@ with st.sidebar:
             "The app will use Template Engine Mode instead."
         )
     elif effective_mode == config.MODE_LLM:
-        st.info("LLM Enhanced Mode is configured. Analyses will use the LLM provider.")
+        st.info(
+            f"LLM Enhanced Mode is configured (Google Gemini · "
+            f"{config.get_llm_model_name()}). Analyses will use the Gemini API."
+        )
 
     st.divider()
     st.markdown("**Load a sample workflow**")

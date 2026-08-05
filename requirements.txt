@@ -1,2 +1,7 @@
 streamlit>=1.36.0
 pandas>=2.0.0
+
+# Optional: enables LLM Enhanced Mode with Google Gemini.
+# The app runs fully in Template Engine Mode without this package; it is only
+# used when an API key (LLM_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY) is set.
+google-genai>=1.0.0
